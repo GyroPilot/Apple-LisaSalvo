@@ -1,0 +1,26 @@
+$EXEC
+${ REV A  18-Oct-2026  LisaSalvo 0.1: cloned from the LisaCheckers REV A file. }
+${==========================================================================}
+${ BSH-MAKE.TEXT -- build LisaSalvo:    compile, link, put the Obj and     }
+${ ICON files in place as tool 419322 (Tim, 17-Oct-2026; on the              }
+${ LisaList2 list), compile the phrase file.  THEN run BSH/INSTALL.  The     }
+${ tool number appears only here and in BSH/INSTALL.                       }
+${                                                                          }
+${ BSH/ICON.BIN must be on the disk before this runs.                       }
+${==========================================================================}
+$SUBMIT BSH/COMP
+$SUBMIT BSH/LINK
+${                                                                          }
+F{ilemgr}D{elete}~{T419322~}Obj
+Y{es}D{elete}~{T419322~}PHRASE
+Y{es}D{elete}~{T419322~}ICON
+Y{es}C{opy}BSH/BSH.OBJ
+~{T419322~}Obj
+C{opy}BSH/ICON.BIN
+~{T419322~}ICON
+Q{uit}
+${                                                                          }
+R{un}Alert
+BSH/ALERTS.TEXT
+~{T419322~}
+$ENDEXEC

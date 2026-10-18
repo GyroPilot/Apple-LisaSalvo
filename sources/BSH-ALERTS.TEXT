@@ -1,0 +1,108 @@
+; ==========================================================================
+;  BSH-ALERTS.TEXT -- phrase-file source for LisaSalvo (419322).
+;  Compiled by the Workshop 'Alert' tool into T419322PHRASE.
+;  Comments on their OWN lines; blank lines are STRUCTURAL; alert numbers
+;  ascend and 1 and 2 are REQUIRED; each section ends with a lone 0.
+; ==========================================================================
+;
+; REV A -- 18-Oct-2026: first build, cloned from CKR-ALERTS REV A.  Menus
+;   are matched BY POSITION against the mi* constants in BSH-GLOBALS; a '-'
+;   separator counts as a position.  Alert lines under 48 characters.
+;
+; ---- FILE HEADER ---------------------------------------------------------
+1
+4
+4000
+?
+Wait
+Stop
+Note
+Caution
+Cancel
+OK
+
+; ==== ALERTS ==============================================================
+;
+1 note alert
+LisaSalvo could not find the message that belongs here.
+If you cannot proceed, mention the number ^N.
+
+2 stop alert
+LisaSalvo is having trouble reaching the disk that holds the
+tool.^L^L
+Put your documents away one at a time, or press the on-off button to
+save them all.
+
+15 note alert
+LisaSalvo 0.1   (18 October 2026)^L^L
+Sea battles on the Apple Lisa against other
+FujiNet machines, or the server's own admirals,
+through an RS-232 FujiNet on Serial B.  The game
+server is Eric Carr's FujiNet Battleship server,
+battleship.carr-designs.com.^L^L
+Tool 419322.  T. O'Connor (bmwcyclist), 2026.
+
+16 note alert
+How to play^L^L
+Pick a table: the AI tables put you against the
+server's admirals; the others wait for people.
+Press R when you are ready.  When the game
+starts, place your five ships (5, 4, 3, 3 and 2
+squares) on your fleet's sea, on the left: click
+a square for each, SPACE turns them, A places
+all at random, RETURN sends them.^L^L
+Then take turns firing: click a square of the
+target sea.  One shot hits every other fleet at
+that square.  Black = a hit, a dot = a miss.
+A fleet with nothing afloat is out; the last
+fleet afloat wins.  45 seconds a turn.
+
+17 note alert
+Keys^L^L
+1 to 9 ... sit at that table^L
+T ... the test table^L
+N ... your name^L
+R ... ready (at a table)^L
+Mouse ... place a ship, or fire^L
+4 6 8 2 or J K I M ... move the cursor^L
+RETURN ... place, send the fleet, or fire^L
+SPACE ... turn the ship being placed^L
+A ... place all ships at random^L
+U ... take back the last ship placed^L
+L ... leave the table^L
+H ... How to Play
+
+0
+
+; ==== MENUS ===============================================================
+1
+File/Print
+Set Aside Everything
+Set Aside "LisaSalvo"
+-
+Save & Put Away
+
+2
+Game
+Choose a Table/T
+Ready/R
+Place Ships at Random
+Leave the Table/L
+-
+Your Name ...
+
+3
+Speed
+Use 9600 baud
+Use 19200 baud
+
+4
+Help
+How to Play/H
+Keys
+
+5
+Version
+About LisaSalvo
+
+0

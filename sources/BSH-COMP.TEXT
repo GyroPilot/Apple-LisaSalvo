@@ -1,0 +1,24 @@
+$EXEC
+${ REV A  18-Oct-2026  LisaSalvo 0.1: cloned from the LisaCheckers REV A file. }
+${==========================================================================}
+${ BSH-COMP.TEXT -- compile LisaSalvo: FNBUS, NET, GLOBALS, then MAIN.       }
+${==========================================================================}
+F{ilemgr}D{elete}BSH/FNBUS.OBJ  Y{es}
+        D{elete}BSH/NET.OBJ  Y{es}
+        D{elete}BSH/GLOBALS.OBJ  Y{es}
+        D{elete}BSH/MAIN.OBJ  Y{es}
+        Q{uit}
+${                                                                          }
+P{ascal Compile}BSH/FNBUS.TEXT
+{no listing file - this comment-only line is the [RETURN] answer}
+BSH/FNBUS.OBJ
+P{ascal Compile}BSH/NET.TEXT
+{no listing file}
+BSH/NET.OBJ
+P{ascal Compile}BSH/GLOBALS.TEXT
+{no listing file - this comment-only line is the [RETURN] answer}
+BSH/GLOBALS.OBJ
+P{ascal Compile}BSH/MAIN.TEXT
+{no listing file}
+BSH/MAIN.OBJ
+$ENDEXEC

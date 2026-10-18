@@ -1,0 +1,165 @@
+unit BshGlobals;
+
+{ REV A  18-Oct-2026  First increment of LisaSalvo (tool 419322, Tim's   }
+{                      name, 17-Oct-2026): the FujiNet Battleship game  }
+{                      on the Lisa.  Shared state and the Filer         }
+{                      handshake, cloned from CKR-GLOBALS REV A.  The   }
+{                      network and the server's replies are in BshNet.  }
+
+{ BSH-GLOBALS.TEXT -- LisaSalvo.                                         }
+{ Sit at a table on the FujiNet Battleship server (against the server's }
+{ own admirals, or people on Ataris, Apple IIs, Commodores ...), place  }
+{ five ships, and take turns firing.  One shot hits every other fleet   }
+{ at that square.                                                        }
+
+INTERFACE
+
+uses (*$U UnitStd.obj *)   UnitStd,
+     (*$U UnitHz.obj *)    UnitHz,
+     (*$U Storage.obj *)   Storage,
+     (*$U QuickDraw.obj *) QuickDraw,
+     (*$U Fontmgr.obj *)   FontMgr,
+     (*$U SysCall.obj *)   SysCall,
+     (*$U wm.events.obj *) Events,
+     (*$U wm.folders.obj *) Folders,
+     (*$U wm.menus.obj *)  Menus,
+     (*$U AlertMgr.obj *)  AlertMgr,
+     (*$U WMLstd.obj *)    WMLstd,
+     (*$U WMlCrs.obj *)    WMLCrs,
+     (*$U FilerComm.obj *) FilerComm;
+
+const
+   bshVersion = 'LisaSalvo 0.1';
+
+   winW      = 680;           { Reversi's window }
+   winH      = 300;
+
+   { your fleet: 10 x 10 squares of 16 x 11 (Lisa pixels are tall) }
+   yfX = 20;
+   yfY = 52;
+   yfW = 16;
+   yfH = 11;
+   { the target sea: 10 x 10 squares of 22 x 15 }
+   tgX = 206;
+   tgY = 34;
+   tgW = 22;
+   tgH = 15;
+   panelX = 446;              { the panel on the right }
+   msgY   = 198;              { the message lines under the seas }
+
+   { what the window is showing }
+   mdTables = 1;              { the list of tables }
+   mdName   = 2;              { typing your name }
+   mdSea    = 3;              { at a table: lobby, placing, playing }
+
+   pollGap  = 3;              { seconds between looks at the server }
+
+   { Menus.  A '-' separator COUNTS as an item position.                 }
+   mFile = 1;                 { "File/Print" }
+      miAsideAll = 1;
+      miAside    = 2;
+      { 3 is a separator }
+      miPutAway  = 4;
+
+   mGame = 2;                 { "Game" }
+      miTables = 1;           { Choose a Table/T }
+      miReady  = 2;           { Ready/R }
+      miRandom = 3;           { Place Ships at Random/A }
+      miLeave  = 4;           { Leave the Table/L }
+      { 5 is a separator }
+      miName   = 6;           { Your Name ... }
+
+   mSpeed = 3;                { "Speed" }
+      mi9600  = 1;
+      mi19200 = 2;
+
+   mHelp = 4;                 { "Help" }
+      miHowTo  = 1;           { How to Play/H }
+      miKeys   = 2;           { Keys }
+
+   mVer = 5;                  { "Version" }
+      miAbout  = 1;
+
+   lastBarMenu = 5;
+   lastMenu    = 5;
+
+   alertVerNum = 1;
+   alrtAbout  = 15;
+   alrtHow    = 16;
+   alrtKeys   = 17;
+
+   { The heap: the alert cache (4000 bytes) and the menus (LisaFuji's).  }
+   maxHeap = 4000;
+
+type
+   StatStr = string[80];
+
+var
+   theEvent  : EventRecord;
+   myWindow  : WindowPtr;
+   toldToDie : boolean;
+   initing   : boolean;
+   myMenus   : array [1..lastMenu] of MenuInfo;
+   allAlerts : TAlertFile;
+   myZone    : array [0..maxHeap] of integer;
+   myVol     : E_Name;
+
+   viewMd    : integer;       { mdTables, mdName, mdSea }
+   msgA      : StatStr;       { the two message lines under the seas }
+   msgB      : StatStr;
+   promptTxt : string[8];     { the name being typed }
+
+   { your fleet while you place it: square and direction (0 across, 1 down) }
+   myPos     : array [1..5] of integer;
+   myDir     : array [1..5] of integer;
+   nPlaced   : integer;
+   placeDir  : integer;
+   sentPlace : boolean;       { /place went to the server }
+   cursorR   : integer;       { the keyboard cursor, rows / columns 0..9 }
+   cursorC   : integer;
+   lastPoll  : longint;       { seconds, from FnSecs }
+   pollOn    : boolean;
+   seed      : longint;
+   idleCnt   : longint;
+
+procedure HandleFilerOp (var wantsOpen : boolean);
+
+
+IMPLEMENTATION
+
+procedure HandleFilerOp {var wantsOpen : boolean};
+var fx  : FilerExt;
+    err : integer;
+begin
+   wantsOpen := false;
+   GetAddParms(err, theEvent, fx);
+
+   case fx.theFlrOp of
+
+      fcNone :
+         wantsOpen := true;              { the user opened the tool }
+
+      fcResume :
+         TellFiler(err, docClosd, internalError, theEvent.who);
+
+      fcClose, fcSuspend, fcShred :
+         begin
+            myWindow := nil;
+            TellFiler(err, docClosd, allOK, theEvent.who)
+         end;
+
+      fcCopy, fcPut :
+         TellFiler(err, docNotXfered, internalError, theEvent.who);
+
+      fcDfClose :
+         TellFiler(err, dfClosed, allOK, theEvent.who);
+
+      fcTerminate :
+         toldToDie := true;
+
+      otherwise
+
+   end
+end;
+
+end.

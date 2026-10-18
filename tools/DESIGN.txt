@@ -1,0 +1,32 @@
+Lisa Battleship client (tool 419322, working name LisaSalvo) -- design REV A, 17-Oct-2026
+
+PROVEN TONIGHT FROM THE BANANA (bsh_probe.py): a whole game between two scripted players on the server's hidden
+"test" table: join (/state), /ready/1, /place/a,b,c,d,e, /attack/N, game over, /leave -- all as plain GETs, so
+PCFuji (GET only) can stand in for the FujiNet in LisaEm.  Binary replies (&bin=1&v=2) parsed as util.go says:
+79-89 bytes in the lobby, 279 bytes while playing with 2 players (~509 with 4).
+Protocol notes: lisatest\reference information\fujinet\GAME_PROTOCOLS_2026-10-17.md.
+
+WHAT THE LISA SIDE NEEDS
+  FnBus (LisaFuji's, linked as is) + a RAW fetch: NwGet turns bytes < 32 into dots and drops CR, so the client
+  reads FnPlB into its own byte buffer (600 bytes), like TwinClock's NtWeb but keeping the bytes.
+  Each request: OPEN N1:HTTPS://battleship.carr-designs.com/<path>?table=T&player=P&bin=1&v=2, read, CLOSE.
+  Poll /state every ~3 s while waiting (the board's 45 s turn timer; 250 s alone against bots).
+
+SCREENS (window 680 x 300, Reversi's skeleton)
+  1. Tables: GET /tables (JSON; small) -> a numbered list: AI 1 on 1, AI 2 bots, AI 3 bots, Cape Fuji, High Seas
+     (players n/4).  Your name: typed once (8 letters, lower case on the server), kept in BSHNAME.DATA.
+  2. Lobby: players and ready marks; R = ready (/ready/1).  Countdown from the server's prompt.
+  3. Placement: your 10 x 10 sea; the five ships 5,4,3,3,2 placed by click (SPACE turns a ship) or A = all at
+     random; then /place.  The client keeps its own ship positions (v2 binary also returns them).
+  4. Battle: your sea (small, left: your ships and the shots on them) and the target sea (big, right).  One
+     shot hits every opponent at that square, so the target sea shows, per square, a hit on anyone (black),
+     a miss on all (dot), or a mix (half); a strip shows each opponent's ships left (5 marks).  Your turn:
+     click a square (or cursor + RETURN) -> /attack/N.  The panel shows whose turn, seconds left, last shot.
+  5. Game over: the server's prompt ("<name> is the naval champion!"), then back to the lobby after 10 s.
+
+TESTING
+  Banana: LisaEm + PCFuji (GET only; fine) on the hidden "test" table, plus bsh_probe-style scripted
+  opponents.  Tim: the 2/10 with the real FujiNet; table "test" (or r1) with the banana's script or LisaEm
+  as the other player; then a real table against other FujiNet machines and the AI tables.
+
+LATER: Lobby list (lobby.fujinet.online/view?platform=atari&appkey=5) to see all open Battleship tables.

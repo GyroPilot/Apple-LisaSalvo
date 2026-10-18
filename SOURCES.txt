@@ -1,0 +1,7 @@
+LisaSalvo 0.1 (REV A) -- what is here
+
+sources/BSH-NET.TEXT      unit BshNet: the Battleship server through the FujiNet; the binary state read byte for byte
+sources/BSH-FNBUS.TEXT    unit FnBus (LisaFuji)
+sources/BSH-GLOBALS.TEXT  unit BshGlobals: constants, menu numbers, state, the Filer handshake
+sources/BSH-MAIN.TEXT     the program: tables, lobby, placing, the two seas, firing, polling from the idle loop
+sources/BSH-ALERTS.TEXT, BSH-COMP.TEXT, BSH-LINK.TEXT, BSH-MAKE.TEXT, BSH-INSTALL.TEXT   alerts, menus, Workshop execs

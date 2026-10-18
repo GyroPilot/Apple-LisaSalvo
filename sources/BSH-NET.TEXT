@@ -1,0 +1,423 @@
+unit BshNet;
+
+{ REV A  18-Oct-2026  LisaSalvo (tool 419322): talking to the FujiNet    }
+{                      Battleship server.  New unit.  NOT yet compiled   }
+{                      on a Lisa.                                         }
+
+{ BSH-NET.TEXT -- every request is one HTTPS GET through an RS-232      }
+{ FujiNet on Serial B (LisaFuji's FnBus unit, linked as it is):          }
+{    N1:HTTPS://battleship.carr-designs.com<path>?bin=1&v=2              }
+{          &table=<table>&player=<name>                                  }
+{ <path> is /tables, /state, /ready/1, /place/a,b,c,d,e, /attack/n or    }
+{ /leave.  The binary replies (the server's util.go; bin=1, v=2) are     }
+{ kept byte for byte in bnBuf -- LisaFuji's NwGet would turn the zero   }
+{ bytes into dots -- and BnState / BnTables read them.                   }
+{                                                                        }
+{ THE STATE (all but /tables and /leave answer with it):                }
+{   0      players at the table (you are always player 1 here)          }
+{   1-33   the server's prompt, zero-padded                             }
+{   34     status: 0 lobby, 1 place ships, 10 playing, 11 a miss,       }
+{          12 a hit, 13 a ship sunk, 99 game over                       }
+{   35     your status: 0 playing (not ready), 1 out, 2 watching,       }
+{          3 ready, 10 must place ships                                  }
+{   36     whose turn: 0 = yours; 255 = nobody; at game over the winner }
+{   37     seconds left in the turn                                      }
+{   lobby: 38-58 the table's name; then the players at 59               }
+{   else:  38 the last square fired at, 39-43 your five ships, 44-48   }
+{          the winner's ships at game over; then the players at 49      }
+{   a player: 9 bytes of name, 1 byte of status, then, once the game   }
+{   has started, 100 bytes of sea (0 not fired at, 1 hit, 2 miss) and  }
+{   5 bytes of ships still afloat (1) or sunk (0).                       }
+{   A ship byte is its top-left square (row * 10 + column) plus 100     }
+{   when it runs down instead of across.  Fleet: 5, 4, 3, 3, 2.         }
+
+INTERFACE
+
+uses (*$U UnitStd.obj *)   UnitStd,
+     (*$U UnitHz.obj *)    UnitHz,
+     (*$U Storage.obj *)   Storage,
+     (*$U QuickDraw.obj *) QuickDraw,
+     (*$U SysCall.obj *)   SysCall,
+     (*$U BSH/FNBUS.OBJ *) FnBus;
+
+const
+   bnBufMax = 700;            { bytes of one reply (4 players: 509) }
+   bnPlMax  = 4;
+   bnTbMax  = 8;
+   bnIdle   = 15000;          { ms a fetch waits with nothing arriving }
+
+type
+   BnByte  = -128..127;
+   BnNmStr = string[8];
+   BnSea   = packed array [0..99] of 0..2;
+
+var
+   bnBuf    : array [0..bnBufMax] of BnByte;
+   bnLen    : integer;
+   bnTable  : BnNmStr;        { the table's id, e.g. ai1, r1, test }
+   bnName   : BnNmStr;        { your name, lower case }
+   bnBaud   : longint;
+   bnWhy    : string[80];     { why the last request failed }
+   bnRc     : integer;        { its FnBus result }
+   bnEcode  : integer;        { OS ecode of the last note-file call }
+
+   { the last state }
+   bsN      : integer;
+   bsPrompt : string[32];
+   bsStatus : integer;
+   bsPStat  : integer;
+   bsActive : integer;        { -1 nobody }
+   bsMove   : integer;
+   bsLast   : integer;
+   bsShip   : array [1..5] of integer;
+   bsWin    : array [1..5] of integer;
+   bsServer : string[20];
+   bsHave   : boolean;        { the seas came with it }
+   plName   : array [1..bnPlMax] of BnNmStr;
+   plStat   : array [1..bnPlMax] of integer;
+   plSea    : array [1..bnPlMax] of BnSea;
+   plLeft   : array [1..bnPlMax, 1..5] of integer;
+
+   { the last table list }
+   tbN      : integer;
+   tbId     : array [1..bnTbMax] of BnNmStr;
+   tbName   : array [1..bnTbMax] of string[20];
+   tbPl     : array [1..bnTbMax] of string[5];
+
+procedure BnInit;
+function  BnGet    (var path : Str255) : boolean;
+function  BnState  : boolean;
+function  BnTables : boolean;
+function  BnLoad   (var vol : E_Name) : boolean;
+function  BnSave   (var vol : E_Name) : boolean;
+
+
+IMPLEMENTATION
+
+{$S BSHNet}
+
+procedure BnInit;
+begin
+   bnLen := 0;
+   bnTable := '';
+   bnName := 'lisa';
+   bnBaud := 9600;
+   bnWhy := '';
+   bnRc := 0;
+   bnEcode := 0;
+   bsN := 0;
+   bsStatus := 0;
+   bsActive := -1;
+   bsHave := false;
+   tbN := 0;
+   FnInit
+end;
+
+function BnU8 (i : integer) : integer;
+var b : integer;
+begin
+   b := 0;
+   if (i >= 0) and (i < bnLen) then begin
+      b := bnBuf[i];
+      if b < 0 then b := b + 256
+   end;
+   BnU8 := b
+end;
+
+procedure BnStr (off, maxLen : integer; var s : Str255);
+{ A zero-ended string of at most maxLen characters at off. }
+var i, b : integer;
+    one  : string[1];
+    go   : boolean;
+begin
+   s := '';
+   one := ' ';
+   i := 0;
+   go := true;
+   while go and (i < maxLen) do begin
+      b := BnU8(off + i);
+      if b = 0 then
+         go := false
+      else begin
+         if (b < 32) or (b > 126) then b := 63;
+         one[1] := chr(b);
+         s := concat(s, one);
+         i := i + 1
+      end
+   end
+end;
+
+function BnGet {var path : Str255} : boolean;
+{ One request: the reply's bytes in bnBuf[0 .. bnLen - 1].  FALSE:      }
+{ bnWhy says why (and bnRc the FnBus result).  The read loop is        }
+{ LisaFuji's NwGet without the pane.                                    }
+var url         : Str255;
+    rc, k, i, b : integer;
+    idle        : longint;
+    t0          : longint;
+    clk         : boolean;
+    done, fail  : boolean;
+    part        : Str255;
+begin
+   BnGet := false;
+   bnLen := 0;
+   bnRc := 0;
+   bnWhy := '';
+   url := concat('N1:HTTPS://battleship.carr-designs.com', path);
+   url := concat(url, '?bin=1&v=2');
+   if path <> '/tables' then begin
+      url := concat(url, concat('&table=', bnTable));
+      url := concat(url, concat('&player=', bnName))
+   end;
+   if not FnPortUp(bnBaud) then begin
+      bnWhy := 'Serial B would not open (is LisaFuji or LISACom using it?)';
+      exit(BnGet)
+   end;
+   rc := FnNClos;                       { a channel left open by a failed fetch }
+   rc := FnNOpen(url, 4, 0);
+   if rc <> fnOK then begin
+      bnRc := rc;
+      bnWhy := 'the FujiNet did not take the request';
+      rc := FnNClos;
+      FnPortDn;
+      exit(BnGet)
+   end;
+   if fnStat = 136 then begin           { nothing to read: an empty answer }
+      rc := FnNClos;
+      FnPortDn;
+      BnGet := true;
+      exit(BnGet)
+   end;
+   if fnStat <> 1 then begin
+      FnNum(fnStat, part);
+      if fnStat = 170 then
+         bnWhy := 'the game server was not found (status 170): is WiFi up?'
+      else if fnStat = 207 then
+         bnWhy := 'no connection to the game server (status 207)'
+      else
+         bnWhy := concat('the game server refused it, status ', part);
+      rc := FnNClos;
+      FnPortDn;
+      exit(BnGet)
+   end;
+   idle := 0;
+   FnTStart(t0, clk);
+   done := false;
+   fail := false;
+   while not (done or fail) do begin
+      if fnWait = 0 then begin
+         rc := FnNStat;
+         if rc <> fnOK then
+            fail := true
+         else if fnWait = 0 then begin
+            if fnStat = 136 then
+               done := true
+            else if (fnConn = 0) and (fnStat <> 1) then
+               done := true
+            else begin
+               FnNap(100);
+               idle := idle + 100;
+               if FnTOver(t0, clk, idle, bnIdle) then begin
+                  fail := true;
+                  rc := fnNoRep
+               end
+            end
+         end
+      end
+      else begin
+         k := fnRdMax;
+         if fnWait < k then
+            k := fnWait;
+         rc := FnNRead(k);
+         if rc <> fnOK then
+            fail := true
+         else begin
+            idle := 0;
+            FnTStart(t0, clk);
+            for i := 0 to fnPlLen - 1 do
+               if bnLen < bnBufMax then begin
+                  b := FnPlB(i);
+                  if b > 127 then b := b - 256;
+                  bnBuf[bnLen] := b;
+                  bnLen := bnLen + 1
+               end
+         end
+      end
+   end;
+   k := FnNClos;
+   FnPortDn;
+   if fail then begin
+      bnRc := rc;
+      bnWhy := 'the answer from the game server stopped part-way';
+      exit(BnGet)
+   end;
+   BnGet := true
+end;
+
+function BnState : boolean;
+{ Read the state now in bnBuf.  FALSE: it is not a state. }
+var off, i, j, rest : integer;
+    s               : Str255;
+begin
+   BnState := false;
+   if bnLen < 38 then
+      exit(BnState);
+   bsN := BnU8(0);
+   if bsN > bnPlMax then bsN := bnPlMax;
+   BnStr(1, 32, s);
+   bsPrompt := s;
+   bsStatus := BnU8(34);
+   bsPStat := BnU8(35);
+   bsActive := BnU8(36);
+   if bsActive = 255 then bsActive := -1;
+   bsMove := BnU8(37);
+   if bsStatus = 0 then begin
+      BnStr(38, 20, s);
+      bsServer := s;
+      off := 59
+   end
+   else begin
+      bsLast := BnU8(38);
+      for i := 1 to 5 do begin
+         bsShip[i] := BnU8(38 + i);
+         bsWin[i] := BnU8(43 + i)
+      end;
+      off := 49
+   end;
+   rest := bnLen - off;
+   bsHave := (bsStatus <> 0) and (rest >= bsN * 115);
+   for i := 1 to bsN do begin
+      BnStr(off, 8, s);
+      plName[i] := s;
+      plStat[i] := BnU8(off + 9);
+      off := off + 10;
+      if bsHave then begin
+         for j := 0 to 99 do
+            plSea[i][j] := BnU8(off + j) mod 3;
+         for j := 1 to 5 do
+            plLeft[i, j] := BnU8(off + 99 + j);
+         off := off + 105
+      end
+   end;
+   BnState := true
+end;
+
+function BnTables : boolean;
+{ Read the table list now in bnBuf: a count, then 36 bytes a table:    }
+{ id (9), name (21), "n / m" (6).                                        }
+var i, off, n : integer;
+    s         : Str255;
+begin
+   BnTables := false;
+   tbN := 0;
+   if bnLen < 1 then
+      exit(BnTables);
+   n := BnU8(0);
+   off := 1;
+   for i := 1 to n do
+      if (tbN < bnTbMax) and (off + 36 <= bnLen) then begin
+         tbN := tbN + 1;
+         BnStr(off, 8, s);
+         tbId[tbN] := s;
+         BnStr(off + 9, 20, s);
+         tbName[tbN] := s;
+         BnStr(off + 30, 5, s);
+         tbPl[tbN] := s;
+         off := off + 36
+      end;
+   BnTables := true
+end;
+
+{------------------------------------------------------------------------}
+{ BSHNAME.DATA beside the tool: your name and the speed, one line:      }
+{    BN1|name|baud <CR>                                                  }
+{------------------------------------------------------------------------}
+
+function BnLoad {var vol : E_Name} : boolean;
+var path     : Pathname;
+    refnum   : integer;
+    got      : longint;
+    ec       : integer;
+    schedErr : integer;
+    i, b     : integer;
+    fld      : integer;
+    f        : array [0..2] of string[12];
+    one      : string[1];
+begin
+   BnLoad := false;
+   path := concat(vol, 'BSHNAME.DATA');
+   Sched_Class(schedErr, false);
+   OPEN(ec, path, refnum, [DRead]);
+   Sched_Class(schedErr, true);
+   if ec > 0 then
+      exit(BnLoad);
+   got := 0;
+   Sched_Class(schedErr, false);
+   READ_DATA(ec, refnum, ord4(@bnBuf), 64, got, sequential, 0);
+   CLOSE_OBJECT(ec, refnum);
+   Sched_Class(schedErr, true);
+   for i := 0 to 2 do f[i] := '';
+   fld := 0;
+   one := ' ';
+   for i := 0 to got - 1 do begin
+      b := bnBuf[i];
+      if b < 0 then b := b + 256;
+      if (b = 124) and (fld < 2) then
+         fld := fld + 1
+      else if (b > 32) and (b <= 126) and (length(f[fld]) < 12) then begin
+         one[1] := chr(b);
+         f[fld] := concat(f[fld], one)
+      end
+   end;
+   if (f[0] <> 'BN1') or (fld < 2) or (length(f[1]) = 0) then
+      exit(BnLoad);
+   if length(f[1]) > 8 then f[1][0] := chr(8);
+   bnName := f[1];
+   if f[2] = '19200' then bnBaud := 19200 else bnBaud := 9600;
+   BnLoad := true
+end;
+
+function BnSave {var vol : E_Name} : boolean;
+{ TwinClock's way: 890 from MAKE_FILE = it is already there. }
+var path     : Pathname;
+    refnum   : integer;
+    ec       : integer;
+    schedErr : integer;
+    wrote    : longint;
+    line     : Str255;
+    i, n     : integer;
+begin
+   BnSave := false;
+   line := concat('BN1|', concat(bnName, '|'));
+   if bnBaud = 19200 then
+      line := concat(line, '19200')
+   else
+      line := concat(line, '9600');
+   n := length(line);
+   for i := 1 to n do
+      bnBuf[i - 1] := ord(line[i]);
+   bnBuf[n] := 13;
+   n := n + 1;
+   path := concat(vol, 'BSHNAME.DATA');
+   Sched_Class(schedErr, false);
+   MAKE_FILE(bnEcode, path, 0);
+   Sched_Class(schedErr, true);
+   if (bnEcode > 0) and (bnEcode <> 890) then
+      exit(BnSave);
+   Sched_Class(schedErr, false);
+   OPEN(bnEcode, path, refnum, [DWrite]);
+   Sched_Class(schedErr, true);
+   if bnEcode > 0 then
+      exit(BnSave);
+   Sched_Class(schedErr, false);
+   WRITE_DATA(bnEcode, refnum, ord4(@bnBuf), n, wrote, sequential, 0);
+   if (bnEcode <= 0) and (wrote = n) then begin
+      TRUNCATE(ec, refnum);
+      BnSave := true
+   end;
+   CLOSE_OBJECT(ec, refnum);
+   Sched_Class(schedErr, true);
+   if bnEcode < 0 then bnEcode := 0
+end;
+
+end.

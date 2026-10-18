@@ -1,0 +1,1092 @@
+program LisaSalvo;
+
+{ BSH-MAIN.TEXT -- LisaSalvo  ***  0.1 REV A  ***                        }
+{ REV A  18-Oct-2026  First increment (tool 419322).  Window, Filer      }
+{                      handshake, menus and the event loop from CKR-MAIN }
+{                      REV A (LisaCheckers, Reversi's skeleton).  New:   }
+{                      the table list, your name, the lobby, placing the }
+{                      fleet, the two seas, firing, and a look at the    }
+{                      server every three seconds from the idle loop.    }
+{                      NOT yet compiled on a Lisa.                       }
+{                                                                        }
+{ THIS LINE IS THE VERSION CHECK: bshVersion in BSH-GLOBALS.TEXT.        }
+{                                                                        }
+{ The game is the FujiNet Battleship server's (Eric Carr's, public, at  }
+{ battleship.carr-designs.com): up to four fleets at a table, the       }
+{ server's own admirals at the AI tables.  10 x 10 sea, ships of 5, 4,  }
+{ 3, 3 and 2.  You fire in turn; one shot hits every other fleet at that }
+{ square; a fleet with nothing afloat is out; the last one wins.  45    }
+{ seconds a turn (250 alone against the AI).  BshNet does the talking.  }
+
+uses (*$U UnitStd.obj *)   UnitStd,
+     (*$U UnitHz.obj *)    UnitHz,
+     (*$U Storage.obj *)   Storage,
+     (*$U QuickDraw.obj *) QuickDraw,
+     (*$U Fontmgr.obj *)   FontMgr,
+     (*$U SysCall.obj *)   SysCall,
+     (*$U wm.events.obj *) Events,
+     (*$U wm.folders.obj *) Folders,
+     (*$U wm.menus.obj *)  Menus,
+     (*$U AlertMgr.obj *)  AlertMgr,
+     (*$U WMLstd.obj *)    WMLstd,
+     (*$U WMlCrs.obj *)    WMLCrs,
+     (*$U FilerComm.obj *) FilerComm,
+     (*$U BSH/FNBUS.OBJ *) FnBus,
+     (*$U BSH/NET.OBJ *)   BshNet,
+     (*$U BSH/GLOBALS.OBJ *) BshGlobals;
+
+var
+   termErr : integer;
+   bshGray : Pattern;             { our own 50% gray (QuickDraw has a gray) }
+   shipLen : array [1..5] of integer;
+
+{------------------------------------------------------------------------}
+{ The three required callbacks.                                          }
+{------------------------------------------------------------------------}
+
+function OutOfHeapSpace (hz : THz; bytesNeeded : integer) : integer;
+begin
+   OutOfHeapSpace := 0
+end;
+
+procedure AlertFailed;
+var err : integer;
+begin
+   if initing then begin
+      TellFiler(err, initFailed, noMemory, nil);
+      Halt
+   end
+end;
+
+procedure LastWishes (environPtr : p_env_blk; excepDataPtr : p_ex_data);
+begin
+   ImDying;
+   Halt
+end;
+
+procedure PutUpMenus;
+var m : integer;
+begin
+   ClearMenuBar;
+   for m := mFile to lastBarMenu do
+      InsertMenu(myMenus[m], 0);
+   DrawMenuBar
+end;
+
+{------------------------------------------------------------------------}
+{ Small helpers.                                                         }
+{------------------------------------------------------------------------}
+
+procedure NumStr (n : longint; var s : Str255);
+var tmp : string[1];
+    neg : boolean;
+begin
+   neg := n < 0;
+   if neg then n := -n;
+   s := '';
+   tmp := '0';
+   repeat
+      tmp[1] := chr(ord('0') + n mod 10);
+      s := concat(tmp, s);
+      n := n div 10
+   until n = 0;
+   if neg then s := concat('-', s)
+end;
+
+procedure SqName (p : integer; var s : Str255);
+{ Square p (row * 10 + column) as A1 .. J10: the letter is the column. }
+var t : Str255;
+begin
+   s := ' ';
+   s[1] := chr(ord('A') + p mod 10);
+   NumStr(p div 10 + 1, t);
+   s := concat(s, t)
+end;
+
+function NextRand (n : integer) : integer;
+{ 0 .. n-1 (Reversi's generator, stirred by the idle count). }
+begin
+   seed := (seed * 75 + 74 + (idleCnt mod 997)) mod 65537;
+   if seed < 0 then seed := -seed;
+   NextRand := (seed div 7) mod n
+end;
+
+function NowSecs : longint;
+var ok : boolean;
+begin
+   NowSecs := FnSecs(ok)
+end;
+
+procedure SyncPort;
+begin
+   if myWindow = nil then
+      exit(SyncPort);
+   SetPort(myWindow);
+   ClipRect(myWindow^.portRect)
+end;
+
+{------------------------------------------------------------------------}
+{ Your fleet.                                                            }
+{------------------------------------------------------------------------}
+
+function ShipHas (pos, dir, len, p : integer) : boolean;
+{ A ship at pos (top-left), dir 0 across / 1 down, len long, covers p. }
+var k, q : integer;
+    yes  : boolean;
+begin
+   yes := false;
+   for k := 0 to len - 1 do begin
+      if dir = 0 then q := pos + k else q := pos + 10 * k;
+      if q = p then yes := true
+   end;
+   ShipHas := yes
+end;
+
+function Fits (pos, dir, len, upTo : integer) : boolean;
+{ The ship stays on the sea and touches none of ships 1 .. upTo. }
+var k, q, j : integer;
+    ok      : boolean;
+begin
+   ok := (pos >= 0) and (pos <= 99);
+   if ok then
+      if dir = 0 then
+         ok := (pos mod 10) + len <= 10
+      else
+         ok := (pos div 10) + len <= 10;
+   if ok then
+      for k := 0 to len - 1 do begin
+         if dir = 0 then q := pos + k else q := pos + 10 * k;
+         for j := 1 to upTo do
+            if ShipHas(myPos[j], myDir[j], shipLen[j], q) then ok := false
+      end;
+   Fits := ok
+end;
+
+function MineAt (p : integer) : boolean;
+{ One of your ships covers p: the server's copy once the game is on,   }
+{ your own while you place them.                                        }
+var j, v : integer;
+    yes  : boolean;
+begin
+   yes := false;
+   if (bsStatus >= 10) and (bsPStat <> 2) then begin   { the server's copy (also after a restart) }
+      for j := 1 to 5 do begin
+         v := bsShip[j];
+         if ShipHas(v mod 100, v div 100, shipLen[j], p) then yes := true
+      end
+   end
+   else
+      for j := 1 to nPlaced do
+         if ShipHas(myPos[j], myDir[j], shipLen[j], p) then yes := true;
+   MineAt := yes
+end;
+
+function WinAt (p : integer) : boolean;
+{ At game over the server shows the winner's fleet. }
+var j, v : integer;
+    yes  : boolean;
+begin
+   yes := false;
+   if (bsStatus = 99) and (bsActive > 0) then
+      for j := 1 to 5 do begin
+         v := bsWin[j];
+         if ShipHas(v mod 100, v div 100, shipLen[j], p) then yes := true
+      end;
+   WinAt := yes
+end;
+
+procedure RandomFleet;
+{ All five ships somewhere legal. }
+var j, tries : integer;
+begin
+   nPlaced := 0;
+   for j := 1 to 5 do begin
+      tries := 0;
+      repeat
+         myDir[j] := NextRand(2);
+         myPos[j] := NextRand(100);
+         tries := tries + 1
+      until Fits(myPos[j], myDir[j], shipLen[j], j - 1) or (tries > 500);
+      nPlaced := j
+   end
+end;
+
+{------------------------------------------------------------------------}
+{ Drawing.  Callers SyncPort first.                                      }
+{------------------------------------------------------------------------}
+
+function MyTurn : boolean;
+begin
+   MyTurn := (bsStatus >= 10) and (bsStatus <= 13) and (bsActive = 0) and (bsPStat = 0)
+end;
+
+function Placing : boolean;
+begin
+   Placing := (bsStatus = 1) and (bsPStat = 10) and (not sentPlace)
+end;
+
+function LastBy : integer;
+{ Who fired the last shot, as an index into plName: the player before   }
+{ the one whose turn it is now (the turn moves on after every shot).    }
+{ 1 = you.                                                               }
+var prev : integer;
+begin
+   prev := bsActive - 1;
+   if prev < 0 then prev := bsN - 1;
+   LastBy := prev + 1
+end;
+
+function TgtMark (p : integer) : integer;
+{ What the target sea shows at p: 1 a hit on some fleet, 2 a miss on   }
+{ every fleet fired at there, 0 not fired at.                           }
+var i, m : integer;
+begin
+   m := 0;
+   if bsHave then
+      for i := 2 to bsN do
+         if plSea[i][p] = 1 then
+            m := 1
+         else if (plSea[i][p] = 2) and (m = 0) then
+            m := 2;
+   TgtMark := m
+end;
+
+procedure DrawSq (target : boolean; p : integer);
+var r, d   : Rect;
+    x, y   : integer;
+    w, h   : integer;
+    m      : integer;
+    cur    : boolean;
+begin
+   if target then begin
+      x := tgX + (p mod 10) * tgW;
+      y := tgY + (p div 10) * tgH;
+      w := tgW;
+      h := tgH
+   end
+   else begin
+      x := yfX + (p mod 10) * yfW;
+      y := yfY + (p div 10) * yfH;
+      w := yfW;
+      h := yfH
+   end;
+   PenNormal;
+   SetRect(r, x + 1, y + 1, x + w, y + h);
+   EraseRect(r);
+   if target then begin
+      if WinAt(p) then begin
+         PenPat(bshGray);
+         PaintRect(r);
+         PenNormal
+      end;
+      m := TgtMark(p)
+   end
+   else begin
+      if MineAt(p) then begin
+         PenPat(bshGray);
+         PaintRect(r);
+         PenNormal
+      end;
+      m := 0;
+      if bsHave and (bsN >= 1) then m := plSea[1][p]
+   end;
+   if m = 1 then begin                       { a hit: a black square }
+      SetRect(d, x + 3, y + 3, x + w - 2, y + h - 2);
+      PaintRect(d)
+   end
+   else if m = 2 then begin                  { a miss: a dot }
+      SetRect(d, x + w div 2 - 1, y + h div 2 - 1, x + w div 2 + 2, y + h div 2 + 1);
+      PaintRect(d)
+   end;
+   if (bsStatus >= 10) and (bsStatus <= 13) and (p = bsLast)
+      and (target = (LastBy = 1)) then begin     { the last shot, on the sea it hit }
+      SetRect(d, x + 2, y + 2, x + w - 1, y + h - 1);
+      FrameRect(d)
+   end;
+   cur := (cursorR * 10 + cursorC = p) and (target <> Placing);
+   if cur then begin
+      FrameRect(r);
+      SetRect(d, x + 2, y + 2, x + w - 1, y + h - 1);
+      FrameRect(d)
+   end
+end;
+
+procedure DrawGrid (x, y, w, h : integer);
+var i : integer;
+begin
+   PenNormal;
+   for i := 0 to 10 do begin
+      MoveTo(x + i * w, y);
+      LineTo(x + i * w, y + 10 * h);
+      MoveTo(x, y + i * h);
+      LineTo(x + 10 * w, y + i * h)
+   end
+end;
+
+procedure DrawSeas;
+var p, i : integer;
+    s    : Str255;
+    r    : Rect;
+begin
+   SetRect(r, 0, 0, panelX, msgY);
+   EraseRect(r);
+   MoveTo(yfX, yfY - 6);
+   DrawString('Your fleet');
+   DrawGrid(yfX, yfY, yfW, yfH);
+   DrawGrid(tgX, tgY, tgW, tgH);
+   s := ' ';
+   for i := 0 to 9 do begin                  { A .. J over the target }
+      s[1] := chr(ord('A') + i);
+      MoveTo(tgX + i * tgW + 8, tgY - 3);
+      DrawString(s)
+   end;
+   for i := 0 to 9 do begin                  { 1 .. 10 beside it }
+      NumStr(i + 1, s);
+      MoveTo(tgX - 4 - StringWidth(s), tgY + i * tgH + 12);
+      DrawString(s)
+   end;
+   for p := 0 to 99 do begin
+      DrawSq(false, p);
+      DrawSq(true, p)
+   end
+end;
+
+procedure PanelLine (n : integer; s : Str255);
+begin
+   MoveTo(panelX + 8, 20 + n * 18);
+   DrawString(s)
+end;
+
+procedure DrawPanel;
+var r    : Rect;
+    s, t : Str255;
+    i, j : integer;
+    n    : integer;
+begin
+   SetRect(r, panelX, 0, winW, msgY);
+   EraseRect(r);
+   PanelLine(0, bshVersion);
+   s := concat('You: ', concat(bnName, concat('   Table: ', bnTable)));
+   PanelLine(1, s);
+   if bsStatus = 0 then
+      s := 'In the lobby.'
+   else if Placing then
+      s := 'Place your ships.'
+   else if bsStatus = 1 then
+      s := 'Waiting for the other fleets.'
+   else if bsStatus = 99 then
+      s := 'Game over.'
+   else if bsPStat = 1 then
+      s := 'Your fleet is sunk: watching.'
+   else if MyTurn then begin
+      NumStr(bsMove, t);
+      s := concat('YOUR TURN: ', concat(t, ' seconds.'))
+   end
+   else if (bsActive > 0) and (bsActive < bsN) then
+      s := concat('Waiting for ', plName[bsActive + 1])
+   else
+      s := '';
+   PanelLine(2, s);
+   for i := 2 to bsN do begin                { the other fleets }
+      s := plName[i];
+      if bsHave then begin
+         n := 0;
+         for j := 1 to 5 do
+            if plLeft[i, j] = 1 then n := n + 1;
+         NumStr(n, t);
+         s := concat(s, concat(':  ', concat(t, ' ships afloat')))
+      end
+      else if bsStatus = 1 then begin          { placing ships }
+         if plStat[i] = 10 then
+            s := concat(s, ':  placing ships')
+         else
+            s := concat(s, ':  ships placed')
+      end
+      else if plStat[i] = 3 then
+         s := concat(s, ':  ready')
+      else
+         s := concat(s, ':  not ready');
+      PanelLine(2 + i, s)
+   end;
+   if (bsStatus >= 11) and (bsStatus <= 13) then begin
+      SqName(bsLast, t);
+      n := LastBy;
+      if n = 1 then
+         s := concat('You fired at ', t)
+      else if n <= bsN then
+         s := concat(plName[n], concat(' fired at ', t))
+      else
+         s := concat('Last shot: ', t);
+      if bsStatus = 11 then s := concat(s, ': a miss.')
+      else if bsStatus = 12 then s := concat(s, ': a HIT!')
+      else s := concat(s, ': SUNK!');
+      PanelLine(8, s)
+   end
+end;
+
+procedure DrawMsgs;
+var r : Rect;
+    s : Str255;
+begin
+   SetRect(r, 0, msgY, winW, winH);
+   EraseRect(r);
+   MoveTo(0, msgY);
+   LineTo(winW, msgY);
+   MoveTo(12, msgY + 18);
+   DrawString(msgA);
+   MoveTo(12, msgY + 36);
+   DrawString(msgB);
+   if Placing then
+      s := 'Click a square for each ship.  SPACE turns it.  U undo.  A = at random.'
+   else if MyTurn then
+      s := 'Click a square of the target to fire (or the cursor and RETURN).'
+   else if bsStatus = 0 then
+      s := 'R = ready.   L = leave the table.   H = help.'
+   else
+      s := 'L = leave the table.   H = help.';
+   MoveTo(12, msgY + 62);
+   DrawString(s);
+   if Placing and (nPlaced = 5) then begin
+      MoveTo(12, msgY + 80);
+      DrawString('All five are placed: RETURN sends your fleet to the server.')
+   end
+end;
+
+procedure DrawList;
+{ The table list, or the name prompt. }
+var r    : Rect;
+    i, y : integer;
+    s, t : Str255;
+begin
+   SetRect(r, 0, 0, winW, winH);
+   EraseRect(r);
+   MoveTo(12, 20);
+   DrawString(concat(bshVersion, '  --  sea battles with any FujiNet machine'));
+   MoveTo(12, 44);
+   if viewMd = mdName then
+      DrawString(concat('Your name (up to 8 letters and digits), RETURN:  ', concat(promptTxt, '_')))
+   else
+      DrawString(concat('Your name: ', concat(bnName, '      (N changes it)')));
+   MoveTo(12, 72);
+   DrawString('Tables at battleship.carr-designs.com:');
+   y := 92;
+   for i := 1 to tbN do begin
+      NumStr(i, s);
+      t := concat('   ', concat(s, concat('   ', tbName[i])));
+      MoveTo(12, y);
+      DrawString(t);
+      MoveTo(300, y);
+      DrawString(concat(tbPl[i], ' players'));
+      y := y + 18
+   end;
+   MoveTo(12, 254);
+   DrawString('Type a table''s number to sit down.   R look again   T test table   N name');
+   MoveTo(12, 276);
+   DrawString(msgA)
+end;
+
+procedure DrawShow;
+begin
+   if myWindow = nil then
+      exit(DrawShow);
+   SyncPort;
+   if viewMd = mdSea then begin
+      DrawSeas;
+      DrawPanel;
+      DrawMsgs
+   end
+   else
+      DrawList
+end;
+
+procedure Say (s : Str255);
+{ The first message line, at once. }
+begin
+   msgA := s;
+   if myWindow <> nil then begin
+      SyncPort;
+      if viewMd = mdSea then DrawMsgs else DrawShow
+   end
+end;
+
+{------------------------------------------------------------------------}
+{ Talking to the server.                                                 }
+{------------------------------------------------------------------------}
+
+function Ask (path : Str255) : boolean;
+{ One request that answers with the state; the window is redrawn. }
+var ok : boolean;
+begin
+   Say('Talking to the game server ...');
+   ok := BnGet(path);
+   if ok then
+      ok := BnState;
+   lastPoll := NowSecs;
+   if not ok then begin
+      if bnWhy = '' then bnWhy := 'the game server sent something unexpected';
+      msgA := concat('No answer: ', bnWhy)
+   end
+   else
+      msgA := bsPrompt;
+   if bsStatus <> 1 then
+      if bsStatus = 0 then begin             { back in the lobby: a new game later }
+         sentPlace := false;
+         nPlaced := 0
+      end;
+   if Placing then begin
+      msgB := 'Place your five ships on your fleet''s sea (left).';
+      cursorR := 0;
+      cursorC := 0
+   end
+   else if MyTurn then
+      msgB := 'Your turn: fire at a square of the target.'
+   else if bsStatus = 99 then
+      msgB := 'The game is over.  A new one starts from the lobby.'
+   else
+      msgB := '';
+   Ask := ok;
+   DrawShow
+end;
+
+procedure LookTables;
+var p : Str255;
+begin
+   viewMd := mdTables;
+   p := '/tables';
+   Say('Asking the game server for its tables ...');
+   if BnGet(p) then begin
+      if BnTables then
+         msgA := ''
+      else
+         msgA := 'The table list did not make sense.'
+   end
+   else
+      msgA := concat('No answer: ', bnWhy);
+   pollOn := false;
+   DrawShow
+end;
+
+procedure SitAt (id : Str255);
+begin
+   bnTable := id;
+   viewMd := mdSea;
+   sentPlace := false;
+   nPlaced := 0;
+   placeDir := 0;
+   bsStatus := 0;
+   bsN := 0;
+   bsHave := false;
+   pollOn := true;
+   if Ask('/state') then ;
+end;
+
+procedure LeaveTable;
+var p : Str255;
+begin
+   if viewMd <> mdSea then
+      exit(LeaveTable);
+   p := '/leave';
+   Say('Leaving the table ...');
+   if BnGet(p) then ;
+   LookTables
+end;
+
+procedure GoReady;
+begin
+   if (viewMd = mdSea) and (bsStatus = 0) then
+      if Ask('/ready/1') then ;
+end;
+
+procedure SendFleet;
+var s, t : Str255;
+    j    : integer;
+begin
+   s := '/place/';
+   for j := 1 to 5 do begin
+      NumStr(myPos[j] + 100 * myDir[j], t);
+      s := concat(s, t);
+      if j < 5 then s := concat(s, ',')
+   end;
+   sentPlace := true;
+   if Ask(s) then ;
+end;
+
+procedure Fire (p : integer);
+var s : Str255;
+begin
+   if not MyTurn then begin
+      Say('It is not your turn yet.');
+      exit(Fire)
+   end;
+   if TgtMark(p) <> 0 then begin
+      SqName(p, s);
+      Say(concat(s, ' was fired at already: pick another square.'));
+      exit(Fire)
+   end;
+   NumStr(p, s);
+   if Ask(concat('/attack/', s)) then ;
+end;
+
+procedure IdlePoll;
+{ From the idle loop: look at the server every pollGap seconds while at }
+{ a table; only every 15 seconds while you place your ships or it is    }
+{ your turn (to notice a turn the server's clock took away).            }
+var gap : longint;
+begin
+   if (myWindow = nil) or (viewMd <> mdSea) or (not pollOn) then
+      exit(IdlePoll);
+   gap := pollGap;
+   if Placing or MyTurn then
+      gap := 15;
+   if NowSecs - lastPoll >= gap then
+      if Ask('/state') then ;
+end;
+
+{------------------------------------------------------------------------}
+{ Placing, keys, clicks.                                                 }
+{------------------------------------------------------------------------}
+
+procedure PlaceAt (p : integer);
+var s : Str255;
+begin
+   if not Placing then
+      exit(PlaceAt);
+   if nPlaced >= 5 then begin
+      Say('All five are placed: RETURN sends them, U takes the last one back.');
+      exit(PlaceAt)
+   end;
+   if Fits(p, placeDir, shipLen[nPlaced + 1], nPlaced) then begin
+      nPlaced := nPlaced + 1;
+      myPos[nPlaced] := p;
+      myDir[nPlaced] := placeDir;
+      SqName(p, s);
+      Say(concat('Ship placed at ', s));
+      SyncPort;
+      DrawSeas
+   end
+   else
+      Say('It does not fit there: off the sea, or on another ship.')
+end;
+
+procedure MoveCursor (dr, dc : integer);
+begin
+   cursorR := cursorR + dr;
+   cursorC := cursorC + dc;
+   if cursorR < 0 then cursorR := 0;
+   if cursorR > 9 then cursorR := 9;
+   if cursorC < 0 then cursorC := 0;
+   if cursorC > 9 then cursorC := 9;
+   if viewMd = mdSea then begin
+      SyncPort;
+      DrawSeas
+   end
+end;
+
+procedure ClickAt (where : Point);
+var c, r : integer;
+begin
+   if viewMd <> mdSea then
+      exit(ClickAt);
+   if (where.h >= tgX) and (where.h < tgX + 10 * tgW)
+      and (where.v >= tgY) and (where.v < tgY + 10 * tgH) then begin
+      c := (where.h - tgX) div tgW;
+      r := (where.v - tgY) div tgH;
+      cursorR := r;
+      cursorC := c;
+      Fire(r * 10 + c)
+   end
+   else if (where.h >= yfX) and (where.h < yfX + 10 * yfW)
+      and (where.v >= yfY) and (where.v < yfY + 10 * yfH) then begin
+      c := (where.h - yfX) div yfW;
+      r := (where.v - yfY) div yfH;
+      cursorR := r;
+      cursorC := c;
+      PlaceAt(r * 10 + c)
+   end
+end;
+
+procedure NameKey (ch : char);
+var tmp : string[1];
+begin
+   if (ch = chr(13)) or (ch = chr(3)) then begin
+      if length(promptTxt) > 0 then begin
+         bnName := promptTxt;
+         if BnSave(myVol) then ;
+      end;
+      viewMd := mdTables;
+      DrawShow
+   end
+   else if ch = chr(8) then begin
+      if length(promptTxt) > 0 then
+         promptTxt[0] := chr(length(promptTxt) - 1);
+      DrawShow
+   end
+   else if ch = chr(27) then begin
+      viewMd := mdTables;
+      DrawShow
+   end
+   else if length(promptTxt) < 8 then begin
+      if (ch >= 'A') and (ch <= 'Z') then ch := chr(ord(ch) + 32);
+      if ((ch >= 'a') and (ch <= 'z')) or ((ch >= '0') and (ch <= '9')) then begin
+         tmp := ' ';
+         tmp[1] := ch;
+         promptTxt := concat(promptTxt, tmp);
+         DrawShow
+      end
+   end
+end;
+
+procedure AskName;
+begin
+   viewMd := mdName;
+   promptTxt := '';
+   DrawShow
+end;
+
+procedure PlainKey (ch : char);
+begin
+   if viewMd = mdName then begin
+      NameKey(ch);
+      exit(PlainKey)
+   end;
+   if viewMd = mdTables then begin
+      if (ch >= '1') and (ch <= '9') then begin
+         if ord(ch) - ord('0') <= tbN then
+            SitAt(tbId[ord(ch) - ord('0')])
+      end
+      else if (ch = 'R') or (ch = 'r') then
+         LookTables
+      else if (ch = 'T') or (ch = 't') then
+         SitAt('test')
+      else if (ch = 'N') or (ch = 'n') then
+         AskName
+      else if (ch = 'H') or (ch = 'h') or (ch = '?') then
+         NoteAlert(allAlerts, alrtHow);
+      exit(PlainKey)
+   end;
+   { at a table }
+   if (ch = '4') or (ch = 'J') or (ch = 'j') then
+      MoveCursor(0, -1)
+   else if (ch = '6') or (ch = 'K') or (ch = 'k') then
+      MoveCursor(0, 1)
+   else if (ch = '8') or (ch = 'I') or (ch = 'i') then
+      MoveCursor(-1, 0)
+   else if (ch = '2') or (ch = 'M') or (ch = 'm') then
+      MoveCursor(1, 0)
+   else if (ch = chr(13)) or (ch = chr(3)) then begin
+      if Placing then begin
+         if nPlaced = 5 then SendFleet else PlaceAt(cursorR * 10 + cursorC)
+      end
+      else
+         Fire(cursorR * 10 + cursorC)
+   end
+   else if ch = ' ' then begin
+      if Placing then begin
+         placeDir := 1 - placeDir;
+         if placeDir = 0 then Say('Ships go across now.') else Say('Ships go down now.')
+      end
+      else
+         Fire(cursorR * 10 + cursorC)
+   end
+   else if (ch = 'U') or (ch = 'u') then begin
+      if Placing and (nPlaced > 0) then begin
+         nPlaced := nPlaced - 1;
+         Say('Took back the last ship.');
+         SyncPort;
+         DrawSeas
+      end
+   end
+   else if (ch = 'A') or (ch = 'a') then begin
+      if Placing then begin
+         RandomFleet;
+         Say('All five placed at random.  RETURN sends them; U takes one back.');
+         SyncPort;
+         DrawSeas
+      end
+   end
+   else if (ch = 'R') or (ch = 'r') then
+      GoReady
+   else if (ch = 'L') or (ch = 'l') then
+      LeaveTable
+   else if (ch = 'H') or (ch = 'h') or (ch = '?') then
+      NoteAlert(allAlerts, alrtHow)
+end;
+
+{------------------------------------------------------------------------}
+{ Window.                                                                }
+{------------------------------------------------------------------------}
+
+procedure doUpdateEvent (normal : boolean; window : WindowPtr);
+begin
+   if normal then BeginUpdate(window);
+   DrawShow;
+   if normal then EndUpdate(window)
+end;
+
+procedure InitNewDoc (window : WindowPtr);
+begin
+   myWindow := window;
+   TakeWindow(myWindow);
+   FolderSize(myWindow, winW, winH, false);
+   SetPort(myWindow);
+   ValidRect(myWindow^.portRect);
+   viewMd := mdTables;
+   msgA := '';
+   msgB := '';
+   DrawShow;
+   LookTables;
+   doUpdateEvent(false, myWindow);
+   if activeFolder = myWindow then
+      PutUpMenus
+end;
+
+procedure DoFilerEvent;
+var wantsOpen : boolean;
+begin
+   HandleFilerOp(wantsOpen);
+   if wantsOpen then
+      InitNewDoc(theEvent.who)
+end;
+
+{------------------------------------------------------------------------}
+{ Commands and events.                                                   }
+{------------------------------------------------------------------------}
+
+procedure MenuCommand (menu, item : integer);
+var err : integer;
+    p   : Str255;
+begin
+   case menu of
+
+      mFile :
+         case item of
+            miAsideAll : DoFilingCmd(cmdClosAll);
+            miAside    : DoFilingCmd(cmdClose);
+            miPutAway  :
+               begin
+                  if viewMd = mdSea then begin   { leave the table first }
+                     p := '/leave';
+                     if BnGet(p) then ;
+                  end;
+                  TellFiler(err, docClosd, docPutBack, myWindow);
+                  myWindow := nil
+               end;
+         end;
+
+      mGame :
+         case item of
+            miTables : if viewMd = mdSea then LeaveTable else LookTables;
+            miReady  : GoReady;
+            miRandom : PlainKey('A');
+            miLeave  : LeaveTable;
+            miName   : if viewMd <> mdSea then AskName;
+         end;
+
+      mSpeed :
+         begin
+            if item = mi19200 then bnBaud := 19200 else bnBaud := 9600;
+            if BnSave(myVol) then ;
+            if bnBaud = 19200 then Say('Speed: 19200 baud.') else Say('Speed: 9600 baud.')
+         end;
+
+      mHelp :
+         case item of
+            miHowTo : NoteAlert(allAlerts, alrtHow);
+            miKeys  : NoteAlert(allAlerts, alrtKeys);
+         end;
+
+      mVer :
+         case item of
+            miAbout : NoteAlert(allAlerts, alrtAbout);
+         end;
+
+   end
+end;
+
+procedure ProcessTheEvent;
+var theMenu, theItem : integer;
+begin
+   case theEvent.what of
+
+      buttonDown :
+         if theEvent.who = menuFolder then begin
+            MenuSelect(theEvent.where, theMenu, theItem);
+            if (theMenu <> 0) and (theItem <> 0) then
+               MenuCommand(theMenu, theItem);
+            HiLiteMenu(0)
+         end
+         else if theEvent.who = myWindow then begin
+            seed := seed + theEvent.where.h * 7 + theEvent.where.v * 13;
+            ClickAt(theEvent.where)
+         end;
+
+      buttonUp :
+         ;
+
+      keyDown :
+         if (theEvent.who = myWindow) and (not theEvent.repeatKey) then begin
+            seed := seed + ord(theEvent.ascii) + 31;
+            if theEvent.appleKey then begin
+               MenuKey(theEvent.ascii, theMenu, theItem);
+               if theMenu <> 0 then begin
+                  HiLiteMenu(theMenu);
+                  MenuCommand(theMenu, theItem);
+                  HiLiteMenu(0)
+               end
+            end
+            else
+               PlainKey(theEvent.ascii)
+         end;
+
+      folderActivate :
+         begin
+            TakeControl(theEvent, false, false);
+            PutUpMenus
+         end;
+
+      folderDeactivate :
+         GiveControl(theEvent);
+
+      folderUpdate :
+         if theEvent.who = myWindow then
+            doUpdateEvent(true, theEvent.who)
+         else begin
+            BeginUpdate(theEvent.who);
+            EndUpdate(theEvent.who)
+         end;
+
+      folderMoved :
+         if theEvent.who = myWindow then
+            DrawShow;
+
+      filerEvent :
+         DoFilerEvent;
+
+      abortEvent, diedEvent, diskEvent, catalogEvent, nilEvent :
+         ;
+
+      otherwise
+
+   end
+end;
+
+{------------------------------------------------------------------------}
+{ Initialize (Reversi's, with LisaFuji's volume prefix).                 }
+{------------------------------------------------------------------------}
+
+procedure Initialize;
+var err      : integer;
+    schedErr : integer;
+    pcInfo   : procinfoRec;
+    excName  : t_ex_name;
+    myPrefix : TParamAlert;
+    cutAt    : integer;
+    i        : integer;
+    tmp1     : string[1];
+begin
+   initing := true;
+
+   excName := 'SYS_TERMINATE';
+   Declare_Excep_Hdl(err, excName, @LastWishes);
+   if err <> 0 then begin
+      TellFiler(err, initFailed, noMemory, nil);
+      halt
+   end;
+
+   toldToDie := false;
+   myWindow  := nil;
+   viewMd    := mdTables;
+   msgA      := '';
+   msgB      := '';
+   promptTxt := '';
+   nPlaced   := 0;
+   placeDir  := 0;
+   sentPlace := false;
+   cursorR   := 0;
+   cursorC   := 0;
+   lastPoll  := 0;
+   pollOn    := false;
+   seed      := 12345;
+   idleCnt   := 0;
+   shipLen[1] := 5;
+   shipLen[2] := 4;
+   shipLen[3] := 3;
+   shipLen[4] := 3;
+   shipLen[5] := 2;
+   for i := 0 to 7 do                 { 50% gray: 170 / 85 alternating }
+      if odd(i) then bshGray[i] := 85 else bshGray[i] := 170;
+   BnInit;
+
+   InitHeap(@myZone[0], @myZone[maxHeap], @OutOfHeapSpace);
+
+   Sched_Class(schedErr, false);
+   Info_Process(err, My_ID, pcInfo);
+   Sched_Class(schedErr, true);
+
+   cutAt := pos('}', pcInfo.progpathname);
+   if (cutAt = 0) or (cutAt > 40) then begin
+      TellFiler(err, initFailed, internalError, nil);
+      halt
+   end;
+   myPrefix := copy(pcInfo.progpathname, 1, cutAt);
+   tmp1 := ' ';
+   tmp1[1] := chr(123);
+   cutAt := pos(tmp1, pcInfo.progpathname);
+   if (cutAt > 1) and (cutAt <= 33) then
+      myVol := copy(pcInfo.progpathname, 1, cutAt - 1)
+   else
+      myVol := '-#12-';
+   if BnLoad(myVol) then ;
+
+   InitMP(theHeap, myPrefix, @AlertFailed, alertVerNum,
+          @myMenus[mFile], allAlerts, err);
+   if err > 0 then begin
+      TellFiler(err, initFailed, noMemory, nil);
+      halt
+   end;
+
+   InitWmlCrs(err);
+   if err <> 0 then begin
+      TellFiler(err, initFailed, noDiskSpace, nil);
+      halt
+   end;
+
+   SetPort(deskPort);
+
+   initing := false
+end;
+
+{------------------------------------------------------------------------}
+{ The main program.  The idle branch looks at the server (IdlePoll).    }
+{------------------------------------------------------------------------}
+
+begin { main program }
+
+   InitGraf(@thePort);
+   OpenWm;
+   Initialize;
+
+   repeat
+
+      while not (ImActive or toldToDie) do begin
+         GetEvent(theEvent);
+         ProcessTheEvent
+      end;
+
+      while ImActive and (not toldToDie) do begin
+         if EventAvail then begin
+            GetEvent(theEvent);
+            ProcessTheEvent
+         end
+         else begin
+            idleCnt := idleCnt + 1;
+            if idleCnt > 1000000 then idleCnt := 0;
+            IdlePoll;
+            LetOthersRun
+         end
+      end;
+
+   until toldToDie;
+
+   termErr := 0
+end.
