@@ -1,5 +1,8 @@
 unit BshGlobals;
 
+{ REV B  18-Oct-2026  0.2: the turn clock (shownSecs), your fleet's      }
+{                      ships afloat, watching, R for the next game.    }
+
 { REV A  18-Oct-2026  First increment of LisaSalvo (tool 419322, Tim's   }
 {                      name, 17-Oct-2026): the FujiNet Battleship game  }
 {                      on the Lisa.  Shared state and the Filer         }
@@ -29,7 +32,7 @@ uses (*$U UnitStd.obj *)   UnitStd,
      (*$U FilerComm.obj *) FilerComm;
 
 const
-   bshVersion = 'LisaSalvo 0.1';
+   bshVersion = 'LisaSalvo 0.3';   { REV D: pictures of the ships }
 
    winW      = 680;           { Reversi's window }
    winH      = 300;
@@ -118,6 +121,7 @@ var
    cursorR   : integer;       { the keyboard cursor, rows / columns 0..9 }
    cursorC   : integer;
    lastPoll  : longint;       { seconds, from FnSecs }
+   shownSecs : longint;       { the turn clock last drawn (REV B) }
    pollOn    : boolean;
    seed      : longint;
    idleCnt   : longint;

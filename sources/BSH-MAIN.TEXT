@@ -1,6 +1,9 @@
 program LisaSalvo;
 
-{ BSH-MAIN.TEXT -- LisaSalvo  ***  0.1 REV A  ***                        }
+{ BSH-MAIN.TEXT -- LisaSalvo  ***  0.2 REV B  ***                        }
+{ REV B  18-Oct-2026  The turn clock counts down between looks at the  }
+{                      server; your ships afloat; watching a game     }
+{                      joined late; R for the next game.              }
 { REV A  18-Oct-2026  First increment (tool 419322).  Window, Filer      }
 {                      handshake, menus and the event loop from CKR-MAIN }
 {                      REV A (LisaCheckers, Reversi's skeleton).  New:   }
@@ -251,13 +254,137 @@ begin
    TgtMark := m
 end;
 
-procedure DrawSq (target : boolean; p : integer);
-var r, d   : Rect;
-    x, y   : integer;
-    w, h   : integer;
-    m      : integer;
-    cur    : boolean;
+function FindShip (p : integer; win : boolean; var j, k, dir : integer) : boolean;
+{ REV D.  Which ship covers p (1 carrier .. 5 destroyer), which of its  }
+{ squares p is (0 = the stern), and its direction (0 across, 1 down):   }
+{ the winner's fleet (win), else yours as MineAt sees it.               }
+var jj, kk, v, n, q, pos, dd : integer;
+    found, srv                : boolean;
 begin
+   found := false;
+   j := 0;
+   k := 0;
+   dir := 0;
+   srv := (bsStatus >= 10) and (bsPStat <> 2);
+   if win or srv then n := 5 else n := nPlaced;
+   for jj := 1 to n do begin
+      if win then
+         v := bsWin[jj]
+      else if srv then
+         v := bsShip[jj]
+      else
+         v := myPos[jj] + 100 * myDir[jj];
+      pos := v mod 100;
+      dd := v div 100;
+      for kk := 0 to shipLen[jj] - 1 do begin
+         if dd = 0 then q := pos + kk else q := pos + 10 * kk;
+         if q = p then begin
+            found := true;
+            j := jj;
+            k := kk;
+            dir := dd
+         end
+      end
+   end;
+   FindShip := found
+end;
+
+procedure ShipSeg (x, y, w, h, j, k, len, dir : integer);
+{ REV D.  Square k of ship j (len squares long, dir 0 across, 1 down) in }
+{ the grid square at x, y (w by h).  Drawn in 'along' and 'across'      }
+{ coordinates; across 0 is the top of the ship (its superstructure).    }
+var aLen, cLen, x0, y0  : integer;
+    hT, hB, i, dd       : integer;
+    a0, a1, last, half  : integer;
+
+   procedure Box (b0, c0, b1, c1 : integer; paint : boolean);
+   var r : Rect;
+   begin
+      if dir = 0 then
+         SetRect(r, x0 + b0, y0 + c0, x0 + b1, y0 + c1)
+      else
+         SetRect(r, x0 + c0, y0 + b0, x0 + c1, y0 + b1);
+      if paint then PaintRect(r) else EraseRect(r)
+   end;
+
+begin
+   if dir = 0 then begin
+      aLen := w - 1;
+      cLen := h - 1;
+      x0 := x + 1;
+      y0 := y + 1
+   end
+   else begin
+      aLen := h - 1;
+      cLen := h - 1;
+      x0 := x + 1 + (w - h) div 2;
+      y0 := y + 1
+   end;
+   hT := (cLen * 3) div 10;
+   hB := cLen - 1;
+   if j = 1 then hT := (cLen * 2) div 10;      { the carrier's high flat deck }
+   if j = 4 then hT := (cLen * 5) div 10;      { the submarine sits low }
+   last := len - 1;
+   half := aLen div 2;
+   a0 := 0;
+   if k > 0 then a0 := -1;                     { across the grid line inside the ship }
+   a1 := aLen;
+   if k < last then a1 := aLen + 1;
+   PenNormal;
+   if (k = last) and (j <> 4) then begin      { the bow, pointed }
+      for i := hT to hB - 1 do begin
+         dd := abs(2 * i - (hT + hB - 1));
+         if aLen - dd > a0 then
+            Box(a0, i, aLen - dd, i + 1, true)
+      end
+   end
+   else
+      Box(a0, hT, a1, hB, true);
+   if k = 0 then begin                         { the stern, rounded }
+      Box(0, hT, 1, hT + 1, false);
+      Box(0, hB - 1, 1, hB, false)
+   end;
+   if (j = 4) and (k = last) then begin        { the submarine's bow, rounded too }
+      Box(aLen - 1, hT, aLen, hT + 1, false);
+      Box(aLen - 1, hB - 1, aLen, hB, false)
+   end;
+   case j of
+      1 : begin                                { carrier: dashed deck, the island }
+             Box(2, hT + 2, aLen - 2, hT + 3, false);
+             if k = 3 then Box(half, 0, aLen - 2, hT, true)
+          end;
+      2 : if k = 2 then                        { battleship: bridge tower, turrets }
+             Box(half - 2, 0, half + 2, hT, true)
+          else if k < last then
+             Box(half - 4, hT - 2, half + 4, hT, true)
+          else
+             Box(1, hT - 2, half - 1, hT, true);
+      3 : if k = 1 then                        { cruiser: bridge, turrets }
+             Box(half - 2, 0, half + 2, hT, true)
+          else if k = 0 then
+             Box(half - 4, hT - 2, half + 4, hT, true)
+          else
+             Box(1, hT - 2, half - 1, hT, true);
+      4 : if k = 1 then                        { submarine: the conning tower }
+             Box(half - 3, hT - 3, half + 3, hT, true);
+      5 : if k = 0 then                        { destroyer: bridge, funnel }
+             Box(half - 2, hT - 3, half + 4, hT, true)
+          else
+             Box(1, hT - 2, 4, hT, true);
+      otherwise
+   end
+end;
+
+procedure DrawSq (target : boolean; p : integer);
+var r, d       : Rect;
+    x, y       : integer;
+    w, h       : integer;
+    m          : integer;
+    cur        : boolean;
+    sj, sk, sd : integer;
+    onShip     : boolean;
+begin
+   onShip := false;
    if target then begin
       x := tgX + (p mod 10) * tgW;
       y := tgY + (p div 10) * tgH;
@@ -274,25 +401,33 @@ begin
    SetRect(r, x + 1, y + 1, x + w, y + h);
    EraseRect(r);
    if target then begin
-      if WinAt(p) then begin
-         PenPat(bshGray);
-         PaintRect(r);
-         PenNormal
-      end;
+      if WinAt(p) then                       { REV D: the winner's ships, drawn }
+         if FindShip(p, true, sj, sk, sd) then begin
+            ShipSeg(x, y, w, h, sj, sk, shipLen[sj], sd);
+            onShip := true
+         end;
       m := TgtMark(p)
    end
    else begin
-      if MineAt(p) then begin
-         PenPat(bshGray);
-         PaintRect(r);
-         PenNormal
-      end;
+      if MineAt(p) then                      { REV D: your ships, drawn }
+         if FindShip(p, false, sj, sk, sd) then begin
+            ShipSeg(x, y, w, h, sj, sk, shipLen[sj], sd);
+            onShip := true
+         end;
       m := 0;
       if bsHave and (bsN >= 1) then m := plSea[1][p]
    end;
    if m = 1 then begin                       { a hit: a black square }
       SetRect(d, x + 3, y + 3, x + w - 2, y + h - 2);
-      PaintRect(d)
+      if onShip then begin                   { REV D: on a ship, a white hole with an X }
+         EraseRect(d);
+         MoveTo(d.left, d.top);
+         LineTo(d.right - 1, d.bottom - 1);
+         MoveTo(d.right - 1, d.top);
+         LineTo(d.left, d.bottom - 1)
+      end
+      else
+         PaintRect(d)
    end
    else if m = 2 then begin                  { a miss: a dot }
       SetRect(d, x + w div 2 - 1, y + h div 2 - 1, x + w div 2 + 2, y + h div 2 + 1);
@@ -378,8 +513,13 @@ begin
       s := 'Game over.'
    else if bsPStat = 1 then
       s := 'Your fleet is sunk: watching.'
+   else if bsPStat = 2 then
+      s := 'Watching (the game had started).'
    else if MyTurn then begin
-      NumStr(bsMove, t);
+      n := bsMove - (NowSecs - lastPoll);         { REV B: counts down between looks }
+      if n < 0 then n := 0;
+      shownSecs := n;
+      NumStr(n, t);
       s := concat('YOUR TURN: ', concat(t, ' seconds.'))
    end
    else if (bsActive > 0) and (bsActive < bsN) then
@@ -387,6 +527,13 @@ begin
    else
       s := '';
    PanelLine(2, s);
+   if bsHave and (bsN >= 1) and (bsPStat <> 2) then begin   { REV B: your own fleet }
+      n := 0;
+      for j := 1 to 5 do
+         if plLeft[1, j] = 1 then n := n + 1;
+      NumStr(n, t);
+      PanelLine(3, concat('Your fleet:  ', concat(t, ' ships afloat')))
+   end;
    for i := 2 to bsN do begin                { the other fleets }
       s := plName[i];
       if bsHave then begin
@@ -541,7 +688,7 @@ begin
    else if MyTurn then
       msgB := 'Your turn: fire at a square of the target.'
    else if bsStatus = 99 then
-      msgB := 'The game is over.  A new one starts from the lobby.'
+      msgB := 'The game is over.  Press R when the next game opens (a few seconds).'
    else
       msgB := '';
    Ask := ok;
@@ -638,8 +785,14 @@ begin
    gap := pollGap;
    if Placing or MyTurn then
       gap := 15;
-   if NowSecs - lastPoll >= gap then
+   if NowSecs - lastPoll >= gap then begin
       if Ask('/state') then ;
+   end
+   else if MyTurn then                        { REV B: the clock, once a second }
+      if bsMove - (NowSecs - lastPoll) <> shownSecs then begin
+         SyncPort;
+         DrawPanel
+      end
 end;
 
 {------------------------------------------------------------------------}
@@ -1005,6 +1158,7 @@ begin
    cursorR   := 0;
    cursorC   := 0;
    lastPoll  := 0;
+   shownSecs := -1;
    pollOn    := false;
    seed      := 12345;
    idleCnt   := 0;

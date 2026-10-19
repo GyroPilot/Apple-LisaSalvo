@@ -9,8 +9,11 @@ Tool number **419322** in the GyroPilot series. Lisa Pascal, Workshop 3.0, Lisa 
 
 ## Status
 
-**0.1 (REV A)** -- built and played in LisaEm against a scripted player at the server's test table: the table list,
-ready, placing the fleet, firing, hits, leaving. Waiting for the Lisa 2/10 (`releases/LISASALVO_0_1_TEST.dc42`).
+**0.3 (REV D)** -- built in LisaEm.  0.1 was played there against a scripted player at the server's test table
+(table list, ready, placing, firing, hits, leaving).  0.2 added a turn clock that counts down, your ships afloat on
+the panel, "watching" when you join a game already under way, R for the next game, and 128-byte network reads.
+0.3 draws the ships: carrier, battleship, cruiser, submarine and destroyer in side view, hits as holes
+(`icon/ship_preview.png`).  Waiting for the Lisa 2/10 (`releases/LISASALVO_0_3_TEST.dc42`).
 
 ## Playing
 
