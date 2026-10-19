@@ -755,7 +755,8 @@ begin
       if j < 5 then s := concat(s, ',')
    end;
    sentPlace := true;
-   if Ask(s) then ;
+   if not Ask(s) then
+      sentPlace := false;                { REV E: not sure the server has it: the next look decides }
 end;
 
 procedure Fire (p : integer);

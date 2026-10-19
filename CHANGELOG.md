@@ -1,5 +1,8 @@
 # LisaSalvo changelog
 
+## 0.3 REV E -- 19 Oct 2026
+- A failed reply while sending your fleet no longer leaves it marked sent; the next look decides.
+  Two whole games played in LisaEm on the public Battleship server (one won by each side).
 ## 0.3 REV D -- 18 Oct 2026
 - Pictures of the ships instead of gray squares: carrier, battleship, cruiser, submarine, destroyer;
   a hit on a ship is a white hole with an X; the winner's fleet at game over drawn the same way.
