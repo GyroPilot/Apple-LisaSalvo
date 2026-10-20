@@ -122,6 +122,8 @@ var
    cursorC   : integer;
    lastPoll  : longint;       { seconds, from FnSecs }
    shownSecs : longint;       { the turn clock last drawn (REV B) }
+   holdEnd   : boolean;       { REV G: a game is over: keep its last screen until R }
+   flashOn   : boolean;       { REV H: the YOUR TURN line flashes (F turns it off) }
    pollOn    : boolean;
    seed      : longint;
    idleCnt   : longint;

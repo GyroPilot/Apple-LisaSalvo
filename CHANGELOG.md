@@ -1,5 +1,11 @@
 # LisaSalvo changelog
 
+## 0.3 REV H -- 20 Oct 2026 -- RELEASE
+- The YOUR TURN line flashes white-on-black on your turn (only that line is redrawn); F turns it off and on.
+## 0.3 REV G -- 20 Oct 2026
+- When a game ends, the final board and both fleets stay on the screen until you press R.
+- Tested on a Lisa 2/10 (REV G and REV H): whole games, the flash, Save & Put Away.
+- Known: the desktop icon draws as a few dots instead of the ship.
 ## 0.3 REV F -- 20 Oct 2026
 - No flashing while you wait: the idle look at the server repaints only what changed; the turn clock
   repaints its own line; the placing cursor is no longer sent back to A1 every 15 s.
