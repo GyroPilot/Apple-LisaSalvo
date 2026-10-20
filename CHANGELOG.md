@@ -1,5 +1,10 @@
 # LisaSalvo changelog
 
+## 0.3 REV F -- 20 Oct 2026
+- No flashing while you wait: the idle look at the server repaints only what changed; the turn clock
+  repaints its own line; the placing cursor is no longer sent back to A1 every 15 s.
+  A whole game in LisaEm on the public Battleship server (91 shots).
+- The release floppy opens on the Lisa (the previous one was made on the Reversi floppy).
 ## 0.3 REV E -- 19 Oct 2026
 - A failed reply while sending your fleet no longer leaves it marked sent; the next look decides.
   Two whole games played in LisaEm on the public Battleship server (one won by each side).

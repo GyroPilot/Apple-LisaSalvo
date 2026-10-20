@@ -660,11 +660,58 @@ end;
 { Talking to the server.                                                 }
 {------------------------------------------------------------------------}
 
-function Ask (path : Str255) : boolean;
-{ One request that answers with the state; the window is redrawn. }
-var ok : boolean;
+procedure DrawClock;
+{ REV F.  The turn clock's own panel line, once a second (DrawPanel    }
+{ erased and redrew the whole panel: a flash every second).             }
+var r    : Rect;
+    n    : longint;
+    s, t : Str255;
 begin
-   Say('Talking to the game server ...');
+   n := bsMove - (NowSecs - lastPoll);
+   if n < 0 then n := 0;
+   shownSecs := n;
+   NumStr(n, t);
+   s := concat('YOUR TURN: ', concat(t, ' seconds.'));
+   SetRect(r, panelX + 1, 44, winW, 61);
+   EraseRect(r);
+   PanelLine(2, s)
+end;
+
+function AskQ (path : Str255; quiet : boolean) : boolean;
+{ One request that answers with the state.  quiet (REV F, the idle     }
+{ look): no 'Talking' line, and only what changed is repainted.        }
+var ok, same : boolean;
+    i, j, p  : integer;
+    oN, oSt, oPS, oAct, oLast : integer;
+    oHave    : boolean;
+    oShip, oWin : array [1..5] of integer;
+    oPlSt    : array [1..bnPlMax] of integer;
+    oPlNm    : array [1..bnPlMax] of BnNmStr;
+    oLeft    : array [1..bnPlMax, 1..5] of integer;
+    oSea     : array [1..bnPlMax] of BnSea;
+    oA, oB   : Str255;
+begin
+   oN := bsN;
+   oSt := bsStatus;
+   oPS := bsPStat;
+   oAct := bsActive;
+   oLast := bsLast;
+   oHave := bsHave;
+   for j := 1 to 5 do begin
+      oShip[j] := bsShip[j];
+      oWin[j] := bsWin[j]
+   end;
+   for i := 1 to bnPlMax do begin
+      oPlSt[i] := plStat[i];
+      oPlNm[i] := plName[i];
+      oSea[i] := plSea[i];
+      for j := 1 to 5 do
+         oLeft[i, j] := plLeft[i, j]
+   end;
+   oA := msgA;
+   oB := msgB;
+   if not quiet then
+      Say('Talking to the game server ...');
    ok := BnGet(path);
    if ok then
       ok := BnState;
@@ -682,8 +729,10 @@ begin
       end;
    if Placing then begin
       msgB := 'Place your five ships on your fleet''s sea (left).';
-      cursorR := 0;
-      cursorC := 0
+      if (not quiet) or (bsStatus <> oSt) then begin   { REV F: not on every look }
+         cursorR := 0;
+         cursorC := 0
+      end
    end
    else if MyTurn then
       msgB := 'Your turn: fire at a square of the target.'
@@ -691,8 +740,43 @@ begin
       msgB := 'The game is over.  Press R when the next game opens (a few seconds).'
    else
       msgB := '';
-   Ask := ok;
-   DrawShow
+   AskQ := ok;
+   if (not quiet) or (myWindow = nil) then begin
+      if myWindow <> nil then
+         DrawShow;
+      exit(AskQ)
+   end;
+   same := (bsN = oN) and (bsStatus = oSt) and (bsPStat = oPS) and (bsActive = oAct);
+   if (bsLast <> oLast) or (bsHave <> oHave) then
+      same := false;
+   for j := 1 to 5 do
+      if (bsShip[j] <> oShip[j]) or (bsWin[j] <> oWin[j]) then
+         same := false;
+   for i := 1 to bnPlMax do begin
+      if (plStat[i] <> oPlSt[i]) or (plName[i] <> oPlNm[i]) then
+         same := false;
+      for j := 1 to 5 do
+         if plLeft[i, j] <> oLeft[i, j] then
+            same := false;
+      for p := 0 to 99 do
+         if plSea[i][p] <> oSea[i][p] then
+            same := false
+   end;
+   SyncPort;
+   if not same then
+      DrawShow
+   else begin
+      if (msgA <> oA) or (msgB <> oB) then
+         DrawMsgs;
+      if MyTurn then
+         DrawClock                       { the look restarted the clock }
+   end
+end;
+
+function Ask (path : Str255) : boolean;
+{ One request that answers with the state; the window is redrawn. }
+begin
+   Ask := AskQ(path, false)
 end;
 
 procedure LookTables;
@@ -787,12 +871,12 @@ begin
    if Placing or MyTurn then
       gap := 15;
    if NowSecs - lastPoll >= gap then begin
-      if Ask('/state') then ;
+      if AskQ('/state', true) then ;          { REV F: quietly }
    end
    else if MyTurn then                        { REV B: the clock, once a second }
       if bsMove - (NowSecs - lastPoll) <> shownSecs then begin
          SyncPort;
-         DrawPanel
+         DrawClock                            { REV F: its own line only }
       end
 end;
 
