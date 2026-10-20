@@ -11,7 +11,7 @@ Tool number **419322** in the GyroPilot series. Lisa Pascal, Workshop 3.0, Lisa 
 
 **0.3 (REV H) -- released 20 October 2026.**  Tested on a Lisa 2/10: whole games against the computer on the
 public Battleship server, the final board kept until R, the flashing YOUR TURN line (F turns it off), Save & Put
-Away.  Release floppy: `releases/LISASALVO_0_3.dc42`.  Known: the desktop icon draws as a few dots (next version).
+Away.  Release floppy: `releases/LISASALVO_0_3.dc42`.
 
 ## Playing
 

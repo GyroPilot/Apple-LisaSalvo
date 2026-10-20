@@ -16,10 +16,6 @@ PLAY
   sea; a hit is a white hole with an X.  When the game ends, the final board stays on the
   screen until you press R for the next game.
 
-KNOWN
-  The tool's icon on the desktop draws as a few dots instead of the ship.  It still opens
-  by its name.  Fixed in the next version.
-
 SOURCE
   Lisa Pascal, Workshop 3.0.  github.com/GyroPilot/Apple-LisaSalvo
   Tim O'Connor (bmwcyclist), with Claude.  Thanks to Eric Carr for the Battleship server.
