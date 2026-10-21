@@ -1,4 +1,4 @@
-LisaSalvo 0.3 (REV D) -- what is here
+LisaSalvo 1.0 (REV I) -- what is here
 
 sources/BSH-NET.TEXT      unit BshNet: the Battleship server through the FujiNet; the binary state read byte for byte
 sources/BSH-FNBUS.TEXT    unit FnBus (LisaFuji)

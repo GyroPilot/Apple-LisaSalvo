@@ -32,7 +32,7 @@ uses (*$U UnitStd.obj *)   UnitStd,
      (*$U FilerComm.obj *) FilerComm;
 
 const
-   bshVersion = 'LisaSalvo 0.3';   { REV D: pictures of the ships }
+   bshVersion = 'LisaSalvo 1.0';   { REV I: 1.0 (Tim, 20-Oct) }   { REV D: pictures of the ships }
 
    winW      = 680;           { Reversi's window }
    winH      = 300;

@@ -1,6 +1,10 @@
 # LisaSalvo changelog
 
-## 0.3 REV H -- 20 Oct 2026 -- RELEASE
+## 1.0 REV I -- 21 Oct 2026 -- RELEASE
+- Version 1.0 (About box 21 October 2026); the program is 0.3 REV H.  A whole game in LisaEm; opens from its
+  floppy.  Known: the server returns a table to the lobby 10 s after a game ends, so if the other fleet's shot
+  ends the game and the Lisa's next look is late, the final board is not kept (a safety net is planned for 1.1).
+## 0.3 REV H -- 20 Oct 2026 -- RELEASE 0.3
 - The YOUR TURN line flashes white-on-black on your turn (only that line is redrawn); F turns it off and on.
 ## 0.3 REV G -- 20 Oct 2026
 - When a game ends, the final board and both fleets stay on the screen until you press R.

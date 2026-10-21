@@ -9,9 +9,10 @@ Tool number **419322** in the GyroPilot series. Lisa Pascal, Workshop 3.0, Lisa 
 
 ## Status
 
-**0.3 (REV H) -- released 20 October 2026.**  Tested on a Lisa 2/10: whole games against the computer on the
-public Battleship server, the final board kept until R, the flashing YOUR TURN line (F turns it off), Save & Put
-Away.  Release floppy: `releases/LISASALVO_0_3.dc42`.
+**1.0 (REV I) -- released 21 October 2026.**  The 0.3 REV H program with the version 1.0: tested on a Lisa 2/10
+(whole games against the computer on the public Battleship server, the final board kept until R, the flashing
+YOUR TURN line, F turns it off, Save & Put Away), and overnight in LisaEm as 1.0 (a whole game, opened from its
+floppy).  Release floppy: `releases/LISASALVO_1_0.dc42`.
 
 ## Playing
 

@@ -1,4 +1,4 @@
-LisaSalvo 0.3 for the Apple Lisa Office System       October 2026 (release build REV H)
+LisaSalvo 1.0 for the Apple Lisa Office System       October 2026 (release build REV I)
 Battleship (Salvo) on the FujiNet Battleship server.  Tool 419322.
 
 PLAY
@@ -22,5 +22,5 @@ SOURCE
   Tested on a Lisa 2/10, October 2026: whole games against the computer.
 
 WHAT'S IN THIS RELEASE
-  LISASALVO_0_3.dc42           the release floppy
-  LisaSalvo_0.3_source.zip     Lisa Pascal sources and exec files
+  LISASALVO_1_0.dc42           the release floppy
+  LisaSalvo_1.0_source.zip     Lisa Pascal sources and exec files
