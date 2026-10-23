@@ -724,6 +724,41 @@ begin
    if ok then
       ok := BnState;
    lastPoll := NowSecs;
+   if ok and (oSt >= 10) and (oSt <= 13) and (bsStatus = 0) and (bnLen < 100) and (not holdEnd) then begin
+      { REV J: a real lobby reply (short; the server answers an out-of-turn shot with a full  }
+      { reply whose status is 0 too) while a game was on: the game ended while we were not   }
+      { looking (the game-over state lasts 10 s).  Twice in a row to be sure: then put the  }
+      { seas and fleets back as they were and hold them, as for an end we saw.             }
+      lobbySeen := lobbySeen + 1;
+      bsN := oN;
+      bsPStat := oPS;
+      bsLast := oLast;
+      bsHave := oHave;
+      for j := 1 to 5 do begin
+         bsShip[j] := oShip[j];
+         bsWin[j] := oWin[j]
+      end;
+      for i := 1 to bnPlMax do begin
+         plStat[i] := oPlSt[i];
+         plName[i] := oPlNm[i];
+         plSea[i] := oSea[i];
+         for j := 1 to 5 do
+            plLeft[i, j] := oLeft[i, j]
+      end;
+      if lobbySeen < 2 then begin             { the first look: keep the game, look again }
+         bsStatus := oSt;
+         bsActive := oAct;
+         bsPrompt := 'Looking again ...'
+      end
+      else begin
+         lobbySeen := 0;
+         bsActive := -1;
+         bsStatus := 99;
+         bsPrompt := 'Game over (last shot not seen)'
+      end
+   end
+   else
+      lobbySeen := 0;
    if not ok then begin
       if bnWhy = '' then bnWhy := 'the game server sent something unexpected';
       msgA := concat('No answer: ', bnWhy)
@@ -1145,11 +1180,11 @@ begin
             miName   : if viewMd <> mdSea then AskName;
          end;
 
-      mSpeed :
+      mSpeed :                           { phase 2 (22-Oct): the FujiNet is set too }
          begin
-            if item = mi19200 then bnBaud := 19200 else bnBaud := 9600;
-            if BnSave(myVol) then ;
-            if bnBaud = 19200 then Say('Speed: 19200 baud.') else Say('Speed: 9600 baud.')
+            Say('Changing the speed: the FujiNet is told and restarted (about 20 s) ...');
+            if item = mi19200 then BnSetSp(19200) else BnSetSp(9600);
+            Say(bnWhy)
          end;
 
       mHelp :
@@ -1269,6 +1304,7 @@ begin
    cursorC   := 0;
    lastPoll  := 0;
    holdEnd   := false;                { REV G }
+   lobbySeen := 0;                    { REV J }
    flashOn   := true;                 { REV H }
    shownSecs := -1;
    pollOn    := false;

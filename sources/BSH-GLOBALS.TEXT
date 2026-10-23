@@ -32,7 +32,7 @@ uses (*$U UnitStd.obj *)   UnitStd,
      (*$U FilerComm.obj *) FilerComm;
 
 const
-   bshVersion = 'LisaSalvo 1.0';   { REV I: 1.0 (Tim, 20-Oct) }   { REV D: pictures of the ships }
+   bshVersion = 'LisaSalvo 1.1';   { REV J: the end of a game is never missed }   { REV D: pictures of the ships }
 
    winW      = 680;           { Reversi's window }
    winH      = 300;
@@ -123,6 +123,7 @@ var
    lastPoll  : longint;       { seconds, from FnSecs }
    shownSecs : longint;       { the turn clock last drawn (REV B) }
    holdEnd   : boolean;       { REV G: a game is over: keep its last screen until R }
+   lobbySeen : integer;       { REV J: short lobby replies in a row while a game was on }
    flashOn   : boolean;       { REV H: the YOUR TURN line flashes (F turns it off) }
    pollOn    : boolean;
    seed      : longint;

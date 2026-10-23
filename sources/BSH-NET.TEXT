@@ -60,6 +60,7 @@ var
    bnTable  : BnNmStr;        { the table's id, e.g. ai1, r1, test }
    bnName   : BnNmStr;        { your name, lower case }
    bnBaud   : longint;
+   bnVol    : E_Name;         { the tool's volume, from BnLoad (phase 2) }
    bnWhy    : string[80];     { why the last request failed }
    bnRc     : integer;        { its FnBus result }
    bnEcode  : integer;        { OS ecode of the last note-file call }
@@ -93,6 +94,7 @@ function  BnState  : boolean;
 function  BnTables : boolean;
 function  BnLoad   (var vol : E_Name) : boolean;
 function  BnSave   (var vol : E_Name) : boolean;
+procedure BnSetSp  (nb : longint);
 
 
 IMPLEMENTATION
@@ -105,6 +107,7 @@ begin
    bnTable := '';
    bnName := 'lisa';
    bnBaud := 9600;
+   bnVol := '';
    bnWhy := '';
    bnRc := 0;
    bnEcode := 0;
@@ -161,6 +164,7 @@ var url         : Str255;
     clk         : boolean;
     done, fail  : boolean;
     part        : Str255;
+    old         : longint;
 begin
    BnGet := false;
    bnLen := 0;
@@ -171,6 +175,13 @@ begin
    if path <> '/tables' then begin
       url := concat(url, concat('&table=', bnTable));
       url := concat(url, concat('&player=', bnName))
+   end;
+   if not fnFound then begin            { phase 2: which speed answers?  Once per launch. }
+      old := bnBaud;
+      if FnFind(bnBaud) = fnOK then
+         if bnBaud <> old then
+            if length(bnVol) > 0 then
+               if BnSave(bnVol) then ;
    end;
    if not FnPortUp(bnBaud) then begin
       bnWhy := 'Serial B would not open (is LisaFuji or LISACom using it?)';
@@ -348,6 +359,7 @@ var path     : Pathname;
     one      : string[1];
 begin
    BnLoad := false;
+   bnVol := vol;                        { phase 2: for a save from BnGet or BnSetSp }
    path := concat(vol, 'BSHNAME.DATA');
    Sched_Class(schedErr, false);
    OPEN(ec, path, refnum, [DRead]);
@@ -421,6 +433,28 @@ begin
    CLOSE_OBJECT(ec, refnum);
    Sched_Class(schedErr, true);
    if bnEcode < 0 then bnEcode := 0
+end;
+
+
+procedure BnSetSp {nb : longint};
+{ Phase 2 (22-Oct): a speed chosen on the menu.  The FujiNet is set too, }
+{ through its web page (FnSetBd), restarted and followed; the choice is  }
+{ kept in the settings file.  The message says how it ended.             }
+var rc, stage : integer;
+    m         : Str255;
+begin
+   if nb = bnBaud then begin
+      FnSpdMsg(fnOK, 0, nb, m);
+      bnWhy := m;
+      exit(BnSetSp)
+   end;
+   rc := FnSetBd(bnBaud, nb, stage);
+   if stage >= 4 then
+      bnBaud := nb;                    { the FujiNet was told, or is there already }
+   if length(bnVol) > 0 then
+      if BnSave(bnVol) then ;
+   FnSpdMsg(rc, stage, bnBaud, m);
+   bnWhy := m
 end;
 
 end.

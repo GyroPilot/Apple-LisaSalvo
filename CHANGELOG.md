@@ -1,5 +1,11 @@
 # LisaSalvo changelog
 
+## 1.1 REV J / REV K -- 22 Oct 2026 -- RELEASE (staged)
+- REV J: the end of a game is never missed. The server answers an out-of-turn shot with a full state whose status
+  byte is 0, so a lobby is judged by the reply's length (79-89 bytes) and confirmed on the next look; the final
+  board stays with 'Game over (last shot not seen)' when the table was already back in the lobby.
+- REV K: the Speed menu sets the FujiNet too (web page over N:, reset, port again); the first port open of each
+  launch probes for the speed (FnFind) and keeps what answers. FnBus at LisaFuji's REV S level. LisaEm-tested 22 Oct.
 ## 1.0 REV I -- 21 Oct 2026 -- RELEASE
 - Version 1.0 (About box 21 October 2026); the program is 0.3 REV H.  A whole game in LisaEm; opens from its
   floppy.  Known: the server returns a table to the lobby 10 s after a game ends, so if the other fleet's shot
